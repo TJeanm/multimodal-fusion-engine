@@ -20,63 +20,111 @@ class DialogueController:
         self.buffer = FusionBuffer(window_s)
         self.default_position = default_position
         self.state = DialogueState.IDLE
+        self.started_at: float | None = None
 
     def on_event(self, event: InputEvent) -> list[PaletteCommand]:
+        """Process an input event and attempt multimodal fusion."""
+
+        # Expire the dialogue based on its first event.
+        if (
+            self.started_at is not None
+            and event.received_at - self.started_at > self.buffer.window_s
+        ):
+            self.reset()
+
+        # Start a new dialogue when receiving its first event.
+        if self.started_at is None:
+            self.started_at = event.received_at
+
+        # Store the incoming event.
         self.buffer.add(event)
         events = self.buffer.get_events(event.received_at)
         self.state = DialogueState.COLLECTING
 
+        # Attempt to create a complete multimodal command.
         command = self._try_create(events)
 
         if command is None:
             return []
 
+        # Reset the dialogue after successful execution.
         self.reset()
         return [command]
 
     def on_tick(self, now: float) -> None:
-        """Expire pending events even when no new input arrives."""
-        if self.buffer.get_events(now):
-            self.state = DialogueState.COLLECTING
-        else:
-            self.state = DialogueState.IDLE
+        """Cancel the dialogue when its fixed time window expires."""
+
+        if (
+            self.started_at is not None
+            and now - self.started_at > self.buffer.window_s
+        ):
+            self.reset()
 
     def reset(self) -> None:
+        """Clear the entire dialogue context."""
+
         self.buffer.clear()
+        self.started_at = None
         self.state = DialogueState.IDLE
 
     def _try_create(
         self, events: list[InputEvent]
     ) -> PaletteCommand | None:
+        """Attempt to fuse events into a CREATE command."""
 
+        # Extract semantic events and pointing events.
         semantic = [
             e for e in events
             if e.kind in ("speech.command", "gesture.recognized")
         ]
-        spoken = [e for e in semantic if e.kind == "speech.command"]
-        clicks = [e for e in events if e.kind == "pointing.click"]
 
+        spoken = [
+            e for e in semantic
+            if e.kind == "speech.command"
+        ]
+
+        clicks = [
+            e for e in events
+            if e.kind == "pointing.click"
+        ]
+
+        # Validate the requested action.
         actions = {
             e.payload["action"]
-            for e in semantic if "action" in e.payload
+            for e in semantic
+            if "action" in e.payload
         }
+
         if actions != {"create"}:
             return None
 
+        # Validate the requested shape.
         shapes = {
             e.payload["shape"]
-            for e in semantic if "shape" in e.payload
+            for e in semantic
+            if "shape" in e.payload
         }
-        valid_shapes = {"circle", "rectangle", "triangle", "diamond"}
+
+        valid_shapes = {
+            "circle",
+            "rectangle",
+            "triangle",
+            "diamond",
+        }
 
         if len(shapes) != 1 or not shapes <= valid_shapes:
             return None
 
+        # Validate explicitly spoken colors.
         colors = {
             e.payload["color"]
-            for e in spoken if "color" in e.payload
+            for e in spoken
+            if "color" in e.payload
         }
-        if len(colors) > 1 or not colors <= {"red", "green", "blue"}:
+
+        valid_colors = {"red", "green", "blue"}
+
+        if len(colors) > 1 or not colors <= valid_colors:
             return None
 
         # Color lookup and object targeting are not implemented yet.
@@ -90,14 +138,23 @@ class DialogueController:
         if len(clicks) > 1:
             return None
 
-        # "Here" requires actual pointing.
-        if any(e.payload.get("position_ref") for e in spoken) and not clicks:
+        # "Here" requires an actual pointing event.
+        if (
+            any(e.payload.get("position_ref") for e in spoken)
+            and not clicks
+        ):
             return None
 
+        # Determine the modalities contributing to this command.
         contributing = {
-            e.modality for e in semantic
-            if any(k in e.payload for k in ("action", "shape"))
+            e.modality
+            for e in semantic
+            if any(
+                k in e.payload
+                for k in ("action", "shape")
+            )
         }
+
         if clicks:
             contributing.add("pointing")
 
@@ -105,11 +162,14 @@ class DialogueController:
         if len(contributing) < 2:
             return None
 
-        x, y = (
-            (clicks[0].payload["x"], clicks[0].payload["y"])
-            if clicks else self.default_position
-        )
+        # Resolve the position.
+        if clicks:
+            x = clicks[0].payload["x"]
+            y = clicks[0].payload["y"]
+        else:
+            x, y = self.default_position
 
+        # Generate the final command.
         return PaletteCommand(
             action="create",
             shape=next(iter(shapes)),

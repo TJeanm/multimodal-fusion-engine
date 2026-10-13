@@ -123,3 +123,60 @@ def test_color_reference_not_implemented():
     )
 
     assert controller.on_event(click(11)) == []
+
+
+def test_dialogue_window_does_not_slide():
+    controller = DialogueController(window_s=4.0)
+
+    assert controller.on_event(
+        speech(10, action="create", shape="circle", position_ref=True)
+    ) == []
+
+    assert controller.on_event(
+        gesture(13, shape="circle")
+    ) == []
+
+    # Too late relative to the first event (t=10).
+    assert controller.on_event(click(14.5)) == []
+
+    # The late click starts a new dialogue.
+    assert controller.started_at == 14.5
+
+
+def test_dialogue_timeout_on_tick():
+    controller = DialogueController(window_s=4.0)
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", position_ref=True)
+    )
+
+    assert controller.state == DialogueState.COLLECTING
+
+    controller.on_tick(14.0)
+    assert controller.state == DialogueState.COLLECTING
+
+    controller.on_tick(14.1)
+    assert controller.state == DialogueState.IDLE
+    assert controller.started_at is None
+    assert controller.buffer.get_events(14.1) == []
+
+
+def test_new_dialogue_after_expiration():
+    controller = DialogueController(window_s=4.0)
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", position_ref=True)
+    )
+
+    # Previous dialogue has expired.
+    assert controller.on_event(click(15)) == []
+
+    # The new speech can combine with the recent click.
+    assert controller.on_event(
+        speech(16, action="create", shape="circle", position_ref=True)
+    ) == [
+        PaletteCommand("create", "circle", 200, 180)
+    ]
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.started_at is None
