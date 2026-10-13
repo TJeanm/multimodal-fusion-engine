@@ -595,3 +595,154 @@ def test_color_lookup_without_pending_request():
     assert controller.on_color_result(99, "blue", 10) == []
     assert controller.state == DialogueState.IDLE
 
+def start_pending_color_lookup():
+    """Prepare a valid pending color lookup for testing."""
+
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(
+            10,
+            action="create",
+            shape="circle",
+            color_ref=True,
+        )
+    )
+
+    controller.on_event(click_at(11, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+
+    return controller, request.request_id
+
+
+def test_color_lookup_duplicate_response():
+    """The same reply must never create two objects."""
+
+    controller, request_id = start_pending_color_lookup()
+
+    expected = PaletteCommand(
+        "create", "circle", 400, 300, color="green"
+    )
+
+    assert controller.on_color_result(
+        request_id, "green", 11.5
+    ) == [expected]
+
+    # Duplicate response must be ignored.
+    assert controller.on_color_result(
+        request_id, "green", 11.6
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+
+
+def test_color_lookup_stale_reply_after_new_request():
+    """An old reply must not complete a newer dialogue."""
+
+    controller, old_id = start_pending_color_lookup()
+
+    # Expire the first dialogue.
+    controller.on_tick(14.5)
+
+    # Start a second color lookup.
+    controller.on_event(
+        speech(
+            15,
+            action="create",
+            shape="circle",
+            color_ref=True,
+        )
+    )
+    controller.on_event(click_at(16, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+    assert request.request_id > old_id
+
+    # Old response must not complete the new request.
+    assert controller.on_color_result(
+        old_id, "red", 16.5
+    ) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+
+    # Correct response completes the new request.
+    assert controller.on_color_result(
+        request.request_id, "blue", 17
+    ) == [
+        PaletteCommand(
+            "create", "circle", 400, 300, color="blue"
+        )
+    ]
+
+
+def test_color_lookup_ignores_new_user_events():
+    """User input cannot alter a pending color request."""
+
+    controller, request_id = start_pending_color_lookup()
+
+    original_events = controller.buffer.get_events(11)
+
+    # A new gesture arrives while awaiting a palette response.
+    assert controller.on_event(
+        gesture(11.2, shape="triangle")
+    ) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+    assert controller.buffer.get_events(11.2) == original_events
+
+    assert controller.on_color_result(
+        request_id, "red", 11.5
+    ) == [
+        PaletteCommand(
+            "create", "circle", 400, 300, color="red"
+        )
+    ]
+
+
+def test_color_lookup_no_object_found():
+    """A click on empty space must not create an object."""
+
+    controller, request_id = start_pending_color_lookup()
+
+    assert controller.on_color_result(
+        request_id, "none", 11.5
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+    assert controller.last_rejection_reason == "color_lookup_failed"
+
+
+def test_color_lookup_manual_reset_invalidates_response():
+    """A cancelled lookup must reject its previous reply."""
+
+    controller, request_id = start_pending_color_lookup()
+
+    controller.reset()
+
+    assert controller.on_color_result(
+        request_id, "blue", 12
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+
+
+def test_color_lookup_exact_timeout_boundary():
+    """A response exactly at the deadline remains valid."""
+
+    controller, request_id = start_pending_color_lookup()
+
+    # The dialogue started at t=10, window=4 seconds.
+    assert controller.on_color_result(
+        request_id, "blue", 14.0
+    ) == [
+        PaletteCommand(
+            "create", "circle", 400, 300, color="blue"
+        )
+    ]
+
+    assert controller.state == DialogueState.IDLE
