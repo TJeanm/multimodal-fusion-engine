@@ -1,171 +1,186 @@
 # Multimodal Dialogue Controller — FSM Design
 
-**Status:** Design proposal, to be reviewed with Developer A before implementing advanced interactions.  
-**Reference:** `docs/interface_contract.md` (v0.1) and the UPSSITECH `lab3-5_fusion.md` assignment.  
+**Status:** Python FSM implemented and unit-tested; palette color lookup and movement integration pending.  
+**Reference:** `docs/interface_contract.md` (v0.1) and UPSSITECH `lab3-5_fusion.md`.  
 **Owner:** Developer B (fusion and dialogue).  
+**Updated:** 2026-10-13.
 
 ## 1. Purpose and scope
 
-The dialogue controller combines speech, gesture and mouse pointing to create or move graphical shapes. It must allow flexible arrival order, keep partial information during a bounded temporal window and never execute a user-facing monomodal operation.
+The controller combines speech, gesture, and pointing events to create and move shapes. It supports flexible input order, a bounded temporal window, and a rule forbidding monomodal commands. As required by the assignment, this document describes **actions/events first**, followed by the **state machine** and its **state/event matrix**.
 
-This document first identifies **actions and events**, then defines the **state machine** and finally the **state/event matrix**, following the order requested by the assignment.
-
-**Implementation boundary:** The current `DialogueController` MVP supports multimodal creation only. Movement, referenced colors and clarification are not implemented. The FSM here is a proposed target design, not a description of already working features.
+**Implementation status:** Python creation, movement-command generation, conflicts, timeouts, deictic object designation, and the `COLOR_LOOKUP` state with `on_color_result()` are implemented. One speech+click creation *without color* has been verified end to end with Ivy and the Processing palette. Actual palette execution of `Fusion Move`, `Fusion GetColor`, `Palette ColorAt`, and colored creation is **not yet verified/implemented** in the current integration.
 
 ## 2. Actions
 
-### 2.1 User operations (required)
+### 2.1 User operations
 
-| Operation | Required semantic data | Optional data | Completion condition |
+| Operation | Required inputs | Options and constraints | Current implementation |
 | --- | --- | --- | --- |
-| `create` | Action and shape (circle, rectangle, triangle, diamond) | Explicit spoken color, spoken color reference, optional designated position | All explicitly requested references resolved; at least two distinct user modalities |
-| `move` | Action, shape, selected source object, target position | Spoken color filter to disambiguate | Exactly one matching source object, destination known; at least two distinct user modalities |
+| `create` | Action + exactly one consistent shape; at least two modalities | Spoken named color; spoken `position_ref` requires a click; default position is allowed when no position is requested | Generates `PaletteCommand(action="create", ...)` |
+| `move` | Action + shape **or** spoken `target_ref=True`; two clicks | First click = source, second = destination; spoken color can filter; `shape="any"` means target unspecified | Generates `PaletteCommand(action="move", ...)`; Processing must resolve unique object |
+| `create` with `color_ref=True` | Spoken color reference + action/shape + one color-source click | Not combined with `position_ref` or `target_ref` in this version; color must come from a palette query | Prepares `ColorLookupRequest`, awaits `on_color_result()`, then returns a colored create command |
 
-A spoken **“here”** explicitly requests a real click; it cannot be satisfied by a default position. A spoken **“this color”** requires a click on a source object, followed by a color lookup. When no position is explicitly designated for `create`, a documented default may be used only when the interaction is otherwise multimodal. Explicit color information must be spoken.
+Named colors come from speech only. `position_ref=True` must be satisfied by actual pointing; a default coordinate cannot replace it. The current controller does not know Processing object identities, so detecting empty/ambiguous object selections is **the Palette's responsibility**.
 
 ### 2.2 Controller actions
 
-| Internal action | Meaning |
+| Action | Meaning / code |
 | --- | --- |
-| `STORE` | Add the received event to the temporal context |
-| `EXPIRE` | Remove expired events and cancel stale dialogues |
-| `UPDATE_SLOTS` | Accumulate recognized action, shape, color, reference flags and clicks |
-| `VALIDATE` | Check completeness, two modalities, domain constraints and contradictions |
-| `REQUEST_COLOR` | Request the palette color at a designated location (future protocol extension) |
-| `EMIT_COMMAND` | Produce one `PaletteCommand` for the output adapter |
-| `REQUEST_CLARIFICATION` | Wait for a disambiguating input, or cancel if unsupported |
-| `RESET` | Clear context after execution, cancellation or timeout |
+| `STORE`, `START` | Add `InputEvent` to `FusionBuffer`; set `started_at` on first event |
+| `EXPIRE` | Expire dialogue when `now - started_at > window_s`, including through `on_tick()` |
+| `VALIDATE` | Test action, shape, spoken color, click count, references, and at least two modalities |
+| `REJECT` | Cancel on conflicting action/shape/colors; store `last_rejection_reason` |
+| `PREPARE_COLOR_LOOKUP` | `_start_color_lookup()` prepares request ID and clicked coordinates; does **not** send an Ivy message |
+| `HANDLE_COLOR_RESULT` | `on_color_result(id, color, now)` validates response and pending context |
+| `EMIT_COMMAND` | Return at most one `PaletteCommand` |
+| `RESET` | Clear buffer, state, start time, and pending query after success/timeout/rejection |
+
+Interactive clarification is **not implemented**; conflicting semantic inputs cause immediate cancellation rather than a `CLARIFICATION` state.
 
 ## 3. Events
 
-### 3.1 Inputs already defined in `InputEvent`
+### 3.1 Input events defined in `events.py`
 
-| `kind` | Modality | Relevant payload | Meaning |
-| --- | --- | --- | --- |
-| `speech.command` | `speech` | `action`, `shape`, `color`, `position_ref`, `color_ref`, `target_ref` | Spoken semantics; may be incomplete |
-| `gesture.recognized` | `gesture` | `shape` or `action` | Recognized shape or operation |
-| `pointing.click` | `pointing` | `x`, `y` | A click in Processing canvas coordinates |
-
-The adapter normalizes provider-specific messages; the FSM never parses raw `sra5` or OneDollarIvy messages. All received timestamps are measured on the same monotonic clock.
-
-### 3.2 Internal / future events
-
-| Event | Trigger | Status |
+| Event kind | Modality | Payload |
 | --- | --- | --- |
-| `TIMEOUT` | Pending interaction exceeds temporal window | Internal event triggered by `on_tick(now)` / expiry check |
-| `CANCEL` | Explicit cancellation or controller fault | Proposed; no existing `InputEvent` kind |
-| `COLOR_RESULT` | Palette returns a color or reports no matching object | Proposed palette query response; **not** currently covered by `InputEvent` or `EventKind` |
-| `AMBIGUITY` | Multiple compatible shapes / objects or conflicting values | Internal validation outcome, not an Ivy message |
+| `speech.command` | Speech | `action`, `shape`, `color`, `position_ref`, `color_ref`, `target_ref` (partial slots allowed) |
+| `gesture.recognized` | Gesture | `shape` and/or `action` |
+| `pointing.click` | Pointing | `x`, `y` in palette pixels |
 
-Adding `COLOR_RESULT` to the public API requires coordination with Developer A: agree on `Palette ColorAt` handling and how its result reaches the controller. Do not pretend the existing `InputEvent` signature already supports it.
+Raw Ivy messages are parsed by Developer A's adapter, which produces normalized `InputEvent` values with monotonic timestamps. The controller is called from a serialized event consumer.
+
+### 3.2 Internal events / methods
+
+| Event | Implementation |
+| --- | --- |
+| `TIMEOUT` | `on_tick(now)` or an event received after the fixed dialogue window |
+| Semantic conflict | `_conflict_reason(events)`; reset and rejection reason |
+| `COLOR_RESULT` | **Separate** `on_color_result()` method; it is **not** an `InputEvent.kind` |
+| Invalid / ambiguous palette color | Matching `on_color_result()` call with `none`, `ambiguous`, or unsupported color: reject and reset |
+| `CANCEL` (explicit user command) | Not yet implemented; `reset()` is available internally |
+| Ambiguous overlapping objects | Not resolved in Python; requires Processing hit-testing |
 
 ## 4. Fusion context and invariants
 
-The dialogue context (built from `FusionBuffer` and controller-specific slots) must store at least:
-
-| Data | Purpose |
+| Data | Current location / meaning |
 | --- | --- |
-| `started_at`, `last_event_at` | Define the dialogue temporal window |
-| `modalities_seen` | Enforce at least two distinct user modalities |
-| `action`, `shape`, `color` | Collected semantic constraints |
-| `position_ref`, `color_ref`, `target_ref` | Detect references that must be resolved by pointing |
-| `pointing_events` | Preserve click order and their locations |
-| `source_position`, `destination_position`, `color_source_position` | Resolved click roles; keep them distinct |
-| `pending_color_request` | Track an outstanding palette query / request ID |
-| `ambiguity_reason` | Explain why execution is blocked |
+| Events | `FusionBuffer` |
+| `state` | `IDLE`, `COLLECTING`, or `COLOR_LOOKUP` |
+| `started_at` | First-event time of the current dialogue |
+| `default_position` | Fallback for creations without a spoken positional reference |
+| `pending_color_request` | `ColorLookupRequest(request_id, x, y)` |
+| `_color_request_seq` | Monotonic counter within one controller process; survives `reset()` |
+| `last_rejection_reason` | Diagnostic reason after a rejected dialogue |
 
-**Design invariant:** the temporal window is measured against the first event of the pending dialogue, not extended indefinitely by every new event. Proposed `FUSION_WINDOW_S=4.0`, configurable after chronogram-based evaluation. The current rolling `FusionBuffer` alone does not implement all transactional-dialogue semantics.
+Action, shape, color, and click roles are **derived from buffered events**, not kept as separate persistent slots. The previous design's `last_event_at`, `modalities_seen`, and separate `source_position`/`destination_position` fields are *not* implemented.
 
-**Pointer-role rule to validate together:** For `move`, two sequential clicks refer to the source object and destination, respectively (even if speech or gesture is received after either click). For a command containing both `color_ref` and `position_ref`, two clicks can be ambiguous unless the design can associate each designation with a specific segment of speech. The controller should request clarification or reject rather than silently assigning roles. A robust implementation may need separate reference-tagging events or more detailed grammar semantics.
+**Invariants:**
 
-## 5. Proposed finite-state machine
+1. A completed command combines at least **two distinct modalities**.
+2. The dialogue deadline is fixed at **4 seconds by default** from `started_at`; subsequent events do not extend it. `FusionBuffer` is rolling, but the dialogue is not.
+3. Incomplete and consistent inputs remain in `COLLECTING`; conflicting action, shape, or spoken colors cause a reset.
+4. A requested position needs a click. A move needs exactly two clicks, interpreted as source then destination.
+5. During `COLOR_LOOKUP`, new user input is ignored until completion or timeout.
+6. Wrong color request IDs are ignored without consuming the pending request. Matching invalid colors and expired replies cannot create shapes.
+7. The buffer and pending query are cleared after command execution, rejection, or timeout. A query ID counter persists within an instance, **not across process restarts**.
+8. A combined `color_ref=True` + `position_ref=True` request is unresolved: clicks cannot yet be assigned unambiguously to color source versus destination.
+9. Producing a `PaletteCommand(move, ...)` does not prove the Palette moved a real object; hit-testing and ambiguity checks remain integration work.
+
+## 5. Implemented finite-state machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
-    IDLE --> COLLECTING: speech / gesture / click\nSTORE, start context
-    COLLECTING --> COLLECTING: more input, missing parameters\nUPDATE_SLOTS
-    COLLECTING --> COLOR_LOOKUP: color_ref + color-source click\nREQUEST_COLOR
-    COLOR_LOOKUP --> COLLECTING: COLOR_RESULT valid\nUPDATE_SLOTS
-    COLOR_LOOKUP --> CLARIFICATION: COLOR_RESULT none / ambiguous
-    COLLECTING --> CLARIFICATION: contradictory / ambiguous input
-    CLARIFICATION --> COLLECTING: clarification resolves ambiguity
-    COLLECTING --> EXECUTING: VALIDATE = complete, consistent, multimodal
-    EXECUTING --> IDLE: EMIT_COMMAND, RESET
-    COLLECTING --> IDLE: TIMEOUT / CANCEL\nRESET
-    COLOR_LOOKUP --> IDLE: TIMEOUT / CANCEL\nRESET
-    CLARIFICATION --> IDLE: TIMEOUT / CANCEL\nRESET
+    IDLE --> COLLECTING: first speech / gesture / click\nSTORE, START
+    COLLECTING --> COLLECTING: consistent, incomplete input\nSTORE, VALIDATE
+    COLLECTING --> COLOR_LOOKUP: color_ref + one color-source click\nPREPARE_COLOR_LOOKUP
+    COLLECTING --> IDLE: valid CREATE or MOVE\nEMIT_COMMAND, RESET
+    COLLECTING --> IDLE: semantic conflict / TIMEOUT\nREJECT or EXPIRE, RESET
+    COLOR_LOOKUP --> COLOR_LOOKUP: wrong request ID / extra user input\nIGNORE
+    COLOR_LOOKUP --> IDLE: valid matching COLOR_RESULT\nEMIT_COMMAND, RESET
+    COLOR_LOOKUP --> IDLE: invalid matching COLOR_RESULT / TIMEOUT\nREJECT or EXPIRE, RESET
 ```
 
-### State semantics
-
-| State | Invariant |
+| State | Meaning |
 | --- | --- |
-| `IDLE` | No pending operation; buffer empty |
-| `COLLECTING` | One dialogue context exists; new modalities and slots are accumulated |
-| `COLOR_LOOKUP` | An asynchronous color query is outstanding; never emit a command until resolved |
-| `CLARIFICATION` | Input is ambiguous/contradictory; no arbitrary command is issued |
-| `EXECUTING` | Transient state: emit at most one complete command, then reset immediately |
+| `IDLE` | No pending dialogue; buffer and color request empty |
+| `COLLECTING` | Collect and validate partial multimodal information |
+| `COLOR_LOOKUP` | Wait for an asynchronous response matching `pending_color_request` |
 
-The initial Python MVP only has `IDLE` and `COLLECTING`; the remaining states are **design targets**, not implemented behavior. A simplified implementation may cancel on ambiguity rather than support interactive clarification, as long as it does not execute an arbitrary command and the limitation is documented.
+`EXECUTING` in the initial proposal is an **instantaneous output-and-reset operation**, not a stored enum state. `CLARIFICATION` is a **future design extension**, not implemented. There is no actual transition through those two states.
 
-## 6. State/event matrix
+## 6. State/event matrix (implemented)
 
-Legend: `S` = store/update slots; `V` = validate operation; `Q` = query palette color; `E` = emit; `R` = reset; `C` = record ambiguity/clarification; `—` = no state change (event may be logged).
+Legend: `S` = store, `V` = validate, `Q` = prepare query, `E` = emit command, `R` = reset, `—` = ignore.
 
-| Current state | Speech / gesture / pointing | Complete valid multimodal context | `COLOR_RESULT` | Contradiction / ambiguity | `TIMEOUT` / `CANCEL` |
-| --- | --- | --- | --- | --- | --- |
-| `IDLE` | `S` → `COLLECTING` | Not applicable | `—` | `—` | `R` → `IDLE` |
-| `COLLECTING` | `S`, `V` → `COLLECTING`, or `Q` → `COLOR_LOOKUP` if necessary | `E` → `EXECUTING` → `IDLE` | Ignore stale result | `C` → `CLARIFICATION` | `R` → `IDLE` |
-| `COLOR_LOOKUP` | Preserve or defer inputs; no execution | Blocked pending color result | Valid → `COLLECTING` then `V`; invalid → `CLARIFICATION` | `C` → `CLARIFICATION` | `R` → `IDLE` |
-| `CLARIFICATION` | Update slots if disambiguating; `V` → `COLLECTING` | Execute only after successful revalidation | Handle only matched pending request | Remain `CLARIFICATION` or cancel | `R` → `IDLE` |
-| `EXECUTING` | No new dialogue mutation until reset | `E`, `R` → `IDLE` | `—` | `—` | `R` → `IDLE` |
+| Current state | New speech / gesture / click | Complete valid context | Matching color result | Wrong / unsolicited color result | Contradiction / invalid matching color | `TIMEOUT` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `IDLE` | `S` → `COLLECTING` | N/A | `—` | `—` | N/A | Stay `IDLE` |
+| `COLLECTING` | `S,V` → `COLLECTING` or `Q` → `COLOR_LOOKUP` | `E,R` → `IDLE` | N/A | `—` | `R` → `IDLE` on semantic conflict | `R` → `IDLE` |
+| `COLOR_LOOKUP` | `—` while within deadline | Blocked | Valid: `E,R` → `IDLE`; invalid: `R` → `IDLE` | `—`, stay `COLOR_LOOKUP` | `R` → `IDLE` for invalid matching color | `R` → `IDLE` |
 
-**Priority of checks:** expiration/cancellation → contradictions and reference ambiguities → pending asynchronous color lookup → completeness → minimum two modalities → command emission. The matrix is a design outline; exact handling of events received during color queries or clarification must be locked down before coding those features.
+A color reply is checked for **timeout before request ID**. Receiving a late user event during `COLOR_LOOKUP` also triggers timeout and may begin a fresh dialogue. The adapter must route replies to the controller in its single consumer thread; the Ivy request/reply transport is still pending.
 
 ## 7. Chronogram-style acceptance examples
 
-### A. Create with speech then click
+### A. Create with speech then click — end-to-end verified
 
-| Time | Event | State | Outcome |
-| --- | --- | --- | --- |
-| 10.0 s | Speech `create circle here` | `IDLE` → `COLLECTING` | Need pointing |
-| 11.0 s | Click `(200, 180)` | `COLLECTING` → `EXECUTING` → `IDLE` | `PaletteCommand(create, circle, 200, 180)` |
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Speech `create circle here` | `IDLE` → `COLLECTING` |
+| 11.0 s | Click `(200, 180)` | Return `PaletteCommand(create, circle, 200, 180)` → `IDLE` |
 
-### B. Create with click then speech (order flexibility)
+An actual Ivy test emitted `Fusion Create=cercle X=229 Y=278`, and the circle appeared in Processing.
 
-| Time | Event | State | Outcome |
-| --- | --- | --- | --- |
-| 10.0 s | Click `(200, 180)` | `IDLE` → `COLLECTING` | Await semantics |
-| 11.0 s | Speech `create circle here` | `COLLECTING` → `EXECUTING` → `IDLE` | Same command as example A |
+### B. Click before speech — Python unit-tested
 
-### C. Create with speech and gesture
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Click `(200, 180)` | `IDLE` → `COLLECTING` |
+| 11.0 s | Speech `create circle here` | Return matching creation command → `IDLE` |
 
-| Time | Event | State | Outcome |
-| --- | --- | --- | --- |
-| 10.0 s | Speech `create` | `IDLE` → `COLLECTING` | Need shape and second modality |
-| 11.0 s | Gesture `diamond` | `COLLECTING` → `EXECUTING` → `IDLE` | Create diamond at agreed default position |
+### C. Speech plus gesture — Python unit-tested
 
-### D. Move a selected shape (future implementation)
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Speech `create` | `IDLE` → `COLLECTING` |
+| 11.0 s | Gesture `diamond` | Create diamond at documented default position → `IDLE` |
 
-| Time | Event | State | Outcome |
-| --- | --- | --- | --- |
-| 10.0 s | Speech `move this rectangle here` | `IDLE` → `COLLECTING` | Need source and destination |
-| 10.8 s | Click source `(100, 150)` | `COLLECTING` | Source candidate known |
-| 11.7 s | Click destination `(300, 250)` | `COLLECTING` → `EXECUTING` → `IDLE` only if source unambiguous | Emit move command |
+### D. Movement — Python unit-tested; Palette execution pending
 
-### E. Expired dialogue
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Speech `move rectangle` | `IDLE` → `COLLECTING` |
+| 10.8 s | Click source `(100, 150)` | Still `COLLECTING` |
+| 11.7 s | Click destination `(300, 250)` | Return `PaletteCommand(move, rectangle, 300, 250, from_x=100, from_y=150)` |
 
-| Time | Event | State | Outcome |
-| --- | --- | --- | --- |
-| 10.0 s | Speech `create circle here` | `IDLE` → `COLLECTING` | Waiting for click |
-| 15.0 s | Click `(200, 180)` | Old dialogue expires | No creation from stale speech |
+Spoken `target_ref=True` without a shape yields `shape="any"`; the Palette must find one unambiguous target.
 
-## 8. Next implementation steps
+### E. Fixed timeout — Python unit-tested
 
-1. Validate design decisions about mouse-click roles, default creation position and ambiguous references with Developer A.
-2. Add controller-level dialogue timeout anchored to `started_at`, without breaking the existing four `FusionBuffer` tests.
-3. Implement FSM transitions for `create` and tests for speech-before-click, click-before-speech, gesture+speech, contradiction and expiration.
-4. Extend to `move` only after agreeing on object selection and target detection with the palette developer.
-5. Add `color_ref` only after specifying the palette query/reply API and its async integration.
-6. Preserve passing tests (`python -m pytest -v`) and add transition-specific regression tests.
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Speech `create circle here` | `COLLECTING` |
+| 13.0 s | Compatible gesture | Still `COLLECTING` |
+| 14.5 s | Pointing click | Old dialogue has expired; no creation using stale speech |
+
+### F. Referenced color — Python unit-tested; Ivy lookup pending
+
+| Time | Event | Result |
+| --- | --- | --- |
+| 10.0 s | Speech `create circle color_ref=true` | `COLLECTING` |
+| 11.0 s | Click `(220, 160)` on color source | Prepare request ID 1, enter `COLOR_LOOKUP` |
+| 11.5 s | `on_color_result(1, "red", 11.5)` | Generate colored circle creation at default position; reset |
+
+Wrong IDs, stale replies and ambiguous/invalid color replies must not create an object.
+
+## 8. Remaining implementation and validation
+
+1. **Developer A:** send `Fusion GetColor X=... Y=... RequestId=...`; listen for `Palette ColorAt RequestId=... Color=...`; convert French colors and route matching replies to `on_color_result()` in the single consumer.
+2. **Developer A:** implement palette hit-testing for color queries, reject `none` and `ambiguous`, and accept `Color=...` for colored creation.
+3. **Developer A + B:** implement real `Fusion Move` execution and test selection/overlapping objects with optional spoken color filter.
+4. **Developer B:** test duplicate replies, stale IDs after a new query, timeout boundaries, unrelated input while waiting, and reset behavior.
+5. **Shared:** design a grammar or clarification protocol for combined `position_ref` and `color_ref`, update class diagrams and chronograms, and capture screenshots for the report.
+
+**Validation recorded:** 50 Python tests passed before the additional robustness tests. The speech-plus-click creation without color was observed end to end. This is **not** proof of functional colored creation or movement in Processing.
