@@ -423,3 +423,85 @@ class DialogueController:
 
         self.state = DialogueState.COLOR_LOOKUP
         return True
+    
+    def on_color_result(
+        self,
+        request_id: int,
+        color: str,
+        now: float,
+    ) -> list[PaletteCommand]:
+        """Process an asynchronous color lookup response."""
+
+        request = self.pending_color_request
+
+        # Ignore unsolicited or already consumed responses.
+        if (
+            self.state != DialogueState.COLOR_LOOKUP
+            or request is None
+        ):
+            return []
+
+        # The entire dialogue must still be within its time window.
+        if (
+            self.started_at is None
+            or now - self.started_at > self.buffer.window_s
+        ):
+            self.reset()
+            return []
+
+        # Ignore responses belonging to another request.
+        if request_id != request.request_id:
+            return []
+
+        # Reject missing, ambiguous or invalid colors.
+        if color not in {"red", "green", "blue"}:
+            self.reset()
+            self.last_rejection_reason = "color_lookup_failed"
+            return []
+
+        # Recover the shape from the stored dialogue context.
+        events = self.buffer.get_events(now)
+
+        semantic = [
+            e for e in events
+            if e.kind in ("speech.command", "gesture.recognized")
+        ]
+
+        actions = {
+            e.payload["action"]
+            for e in semantic
+            if "action" in e.payload
+        }
+
+        shapes = {
+            e.payload["shape"]
+            for e in semantic
+            if "shape" in e.payload
+        }
+
+        valid_shapes = {
+            "circle", "rectangle", "triangle", "diamond"
+        }
+
+        if (
+            actions != {"create"}
+            or len(shapes) != 1
+            or not shapes <= valid_shapes
+        ):
+            self.reset()
+            self.last_rejection_reason = "invalid_color_lookup_context"
+            return []
+
+        # The pointing event selected a color source, not a position.
+        x, y = self.default_position
+
+        command = PaletteCommand(
+            action="create",
+            shape=next(iter(shapes)),
+            x=x,
+            y=y,
+            color=color,
+        )
+
+        self.reset()
+        return [command]

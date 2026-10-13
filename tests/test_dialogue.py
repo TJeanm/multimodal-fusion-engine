@@ -510,3 +510,88 @@ def test_combined_color_and_position_refs_wait():
     # Click roles are not yet distinguishable.
     assert controller.pending_color_request is None
     assert controller.state == DialogueState.COLLECTING
+
+def test_color_lookup_result_creates_shape():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+
+    assert controller.on_color_result(
+        request.request_id, "red", 11.5
+    ) == [
+        PaletteCommand("create", "circle", 400, 300, color="red")
+    ]
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+
+
+def test_color_lookup_wrong_request_id():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+
+    assert controller.on_color_result(
+        request.request_id + 1, "red", 11.5
+    ) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+    assert controller.pending_color_request == request
+
+
+def test_color_lookup_late_response():
+    controller = DialogueController(window_s=4.0)
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+
+    assert controller.on_color_result(
+        request.request_id, "red", 14.5
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+
+
+def test_color_lookup_ambiguous_response():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    request = controller.pending_color_request
+    assert request is not None
+
+    assert controller.on_color_result(
+        request.request_id, "ambiguous", 11.5
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "color_lookup_failed"
+
+
+def test_color_lookup_without_pending_request():
+    controller = DialogueController()
+
+    assert controller.on_color_result(99, "blue", 10) == []
+    assert controller.state == DialogueState.IDLE
+
