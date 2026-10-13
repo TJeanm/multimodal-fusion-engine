@@ -85,6 +85,8 @@ def test_conflicting_shapes():
     assert controller.on_event(
         gesture(11, shape="triangle")
     ) == []
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_shape"
 
 
 def test_here_requires_click():
@@ -302,3 +304,209 @@ def test_move_timeout():
     assert controller.on_event(
         click_at(14.5, 300, 250)
     ) == []
+
+
+
+def test_conflicting_actions_cancel_dialogue():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle")
+    )
+
+    assert controller.on_event(
+        gesture(11, action="move")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.started_at is None
+    assert controller.last_rejection_reason == "conflicting_action"
+    assert controller.buffer.get_events(11) == []
+
+
+def test_conflicting_colors_cancel_dialogue():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color="red")
+    )
+
+    assert controller.on_event(
+        speech(11, color="blue")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_color"
+
+
+def test_conflict_does_not_reuse_old_clicks():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="move", shape="rectangle")
+    )
+
+    controller.on_event(
+        click_at(11, 100, 150)
+    )
+
+    assert controller.on_event(
+        gesture(12, shape="triangle")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_shape"
+
+    # A fresh dialogue cannot reuse the old source click.
+    assert controller.on_event(
+        click_at(13, 300, 250)
+    ) == []
+
+    assert controller.on_event(
+        speech(14, action="move", shape="rectangle")
+    ) == []
+
+
+def test_consistent_semantics_are_not_rejected():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(10, action="create", shape="circle")
+    ) == []
+
+    assert controller.on_event(
+        gesture(11, shape="circle")
+    ) == [
+        PaletteCommand("create", "circle", 400, 300)
+    ]
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason is None
+
+def test_move_this_object_without_shape():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(
+            10,
+            action="move",
+            target_ref=True,
+            position_ref=True,
+        )
+    ) == []
+
+    assert controller.on_event(
+        click_at(11, 100, 150)
+    ) == []
+
+    assert controller.on_event(
+        click_at(12, 300, 250)
+    ) == [
+        PaletteCommand(
+            "move", "any", 300, 250,
+            from_x=100, from_y=150,
+        )
+    ]
+
+
+def test_move_this_object_reverse_order():
+    controller = DialogueController()
+
+    controller.on_event(click_at(10, 100, 150))
+    controller.on_event(click_at(11, 300, 250))
+
+    assert controller.on_event(
+        speech(
+            12,
+            action="move",
+            target_ref=True,
+            position_ref=True,
+        )
+    ) == [
+        PaletteCommand(
+            "move", "any", 300, 250,
+            from_x=100, from_y=150,
+        )
+    ]
+
+
+def test_move_without_shape_or_target():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="move")
+    )
+    controller.on_event(click_at(11, 100, 150))
+
+    # No shape and no explicit target reference.
+    assert controller.on_event(
+        click_at(12, 300, 250)
+    ) == []
+
+
+def test_color_lookup_request():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    ) == []
+
+    assert controller.on_event(click_at(11, 220, 160)) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+
+    request = controller.pending_color_request
+
+    assert request is not None
+    assert request.request_id == 1
+    assert request.x == 220
+    assert request.y == 160
+
+
+def test_color_lookup_reverse_order():
+    controller = DialogueController()
+
+    assert controller.on_event(click_at(10, 220, 160)) == []
+
+    assert controller.on_event(
+        speech(11, action="create", shape="circle", color_ref=True)
+    ) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+    assert controller.pending_color_request is not None
+
+
+def test_color_lookup_timeout():
+    controller = DialogueController(window_s=4.0)
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+
+    controller.on_tick(14.5)
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+
+
+def test_combined_color_and_position_refs_wait():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(
+            10,
+            action="create",
+            shape="circle",
+            color_ref=True,
+            position_ref=True,
+        )
+    )
+
+    assert controller.on_event(click_at(11, 220, 160)) == []
+
+    # Click roles are not yet distinguishable.
+    assert controller.pending_color_request is None
+    assert controller.state == DialogueState.COLLECTING
