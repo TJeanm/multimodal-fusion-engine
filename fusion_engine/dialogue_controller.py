@@ -45,6 +45,9 @@ class DialogueController:
         command = self._try_create(events)
 
         if command is None:
+            command = self._try_move(events)
+
+        if command is None:
             return []
 
         # Reset the dialogue after successful execution.
@@ -176,4 +179,92 @@ class DialogueController:
             x=x,
             y=y,
             color=next(iter(colors), None),
+        )
+    
+    def _try_move(
+        self, events: list[InputEvent]
+    ) -> PaletteCommand | None:
+        """Attempt to fuse events into a MOVE command."""
+
+        semantic = [
+            e for e in events
+            if e.kind in ("speech.command", "gesture.recognized")
+        ]
+
+        spoken = [
+            e for e in semantic
+            if e.kind == "speech.command"
+        ]
+
+        clicks = [
+            e for e in events
+            if e.kind == "pointing.click"
+        ]
+
+        # The action must explicitly be MOVE.
+        actions = {
+            e.payload["action"]
+            for e in semantic
+            if "action" in e.payload
+        }
+
+        if actions != {"move"}:
+            return None
+
+        # The shape must be identified.
+        shapes = {
+            e.payload["shape"]
+            for e in semantic
+            if "shape" in e.payload
+        }
+
+        valid_shapes = {
+            "circle", "rectangle", "triangle", "diamond"
+        }
+
+        if len(shapes) != 1 or not shapes <= valid_shapes:
+            return None
+
+        # Optional color filter must come from speech.
+        colors = {
+            e.payload["color"]
+            for e in spoken
+            if "color" in e.payload
+        }
+
+        if len(colors) > 1 or not colors <= {
+            "red", "green", "blue"
+        }:
+            return None
+
+        # Referenced colors require future palette integration.
+        if any(e.payload.get("color_ref") for e in spoken):
+            return None
+
+        # Source and destination must both be designated.
+        if len(clicks) != 2:
+            return None
+
+        # Enforce multimodal interaction.
+        modalities = {
+            e.modality
+            for e in semantic
+            if "action" in e.payload or "shape" in e.payload
+        }
+        modalities.add("pointing")
+
+        if len(modalities) < 2:
+            return None
+
+        # First click selects the source, second the destination.
+        source, destination = clicks
+
+        return PaletteCommand(
+            action="move",
+            shape=next(iter(shapes)),
+            x=destination.payload["x"],
+            y=destination.payload["y"],
+            color=next(iter(colors), None),
+            from_x=source.payload["x"],
+            from_y=source.payload["y"],
         )
