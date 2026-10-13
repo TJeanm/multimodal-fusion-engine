@@ -234,7 +234,17 @@ class DialogueController:
             "circle", "rectangle", "triangle", "diamond"
         }
 
-        if len(shapes) != 1 or not shapes <= valid_shapes:
+        # Resolve explicit shape or deictic target.
+        if len(shapes) == 1 and shapes <= valid_shapes:
+            selected_shape = next(iter(shapes))
+
+        elif not shapes and any(
+            e.payload.get("target_ref") for e in spoken
+        ):
+            # Shape will be determined by palette hit-testing.
+            selected_shape = "any"
+
+        else:
             return None
 
         # Optional color filter must come from speech.
@@ -273,7 +283,7 @@ class DialogueController:
 
         return PaletteCommand(
             action="move",
-            shape=next(iter(shapes)),
+            shape=selected_shape,
             x=destination.payload["x"],
             y=destination.payload["y"],
             color=next(iter(colors), None),

@@ -382,3 +382,63 @@ def test_consistent_semantics_are_not_rejected():
 
     assert controller.state == DialogueState.IDLE
     assert controller.last_rejection_reason is None
+
+def test_move_this_object_without_shape():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(
+            10,
+            action="move",
+            target_ref=True,
+            position_ref=True,
+        )
+    ) == []
+
+    assert controller.on_event(
+        click_at(11, 100, 150)
+    ) == []
+
+    assert controller.on_event(
+        click_at(12, 300, 250)
+    ) == [
+        PaletteCommand(
+            "move", "any", 300, 250,
+            from_x=100, from_y=150,
+        )
+    ]
+
+
+def test_move_this_object_reverse_order():
+    controller = DialogueController()
+
+    controller.on_event(click_at(10, 100, 150))
+    controller.on_event(click_at(11, 300, 250))
+
+    assert controller.on_event(
+        speech(
+            12,
+            action="move",
+            target_ref=True,
+            position_ref=True,
+        )
+    ) == [
+        PaletteCommand(
+            "move", "any", 300, 250,
+            from_x=100, from_y=150,
+        )
+    ]
+
+
+def test_move_without_shape_or_target():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="move")
+    )
+    controller.on_event(click_at(11, 100, 150))
+
+    # No shape and no explicit target reference.
+    assert controller.on_event(
+        click_at(12, 300, 250)
+    ) == []
