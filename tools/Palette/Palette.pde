@@ -15,6 +15,7 @@ int indice_forme;
 PImage sketch_icon;
 
 Ivy bus;
+boolean fusionMode = true;
 
 ConcurrentLinkedQueue<String[]> commandesIvy = new ConcurrentLinkedQueue<String[]>();
 
@@ -83,9 +84,33 @@ void affiche() {
     (formes.get(i)).update();
 }
 
-void mousePressed() { // sur l'événement clic
-  Point p = new Point(mouseX,mouseY);
-  
+void mousePressed() {
+
+  // Forward mouse clicks to the multimodal fusion engine
+  if (fusionMode) {
+
+    if (mouseButton != LEFT) {
+      return;
+    }
+
+    String message = "Palette Click X=" + mouseX
+                   + " Y=" + mouseY;
+
+    try {
+      if (bus != null) {
+        bus.sendMsg(message);
+        println("[IVY] Sent: " + message);
+      }
+    } catch (IvyException e) {
+      println("[IVY] Error: " + e.getMessage());
+    }
+
+    return;
+  }
+
+  // Original palette behavior
+  Point p = new Point(mouseX, mouseY);
+
   switch (mae) {
     case AFFICHER_FORMES:
       for (int i=0;i<formes.size();i++) { // we're trying every object in the list
@@ -121,8 +146,25 @@ void mousePressed() { // sur l'événement clic
 
 
 void keyPressed() {
-  Point p = new Point(mouseX,mouseY);
+
+  // Toggle between multimodal and local debug modes
+  if (key == 'v' || key == 'V') {
+    fusionMode = !fusionMode;
+
+    println("[MODE] " + (fusionMode ? "Fusion" : "Debug"));
+    return;
+  }
+
+  // Disable local keyboard actions in multimodal mode
+  if (fusionMode) {
+    return;
+  }
+
+  // Existing code below
+  Point p = new Point(mouseX, mouseY);
+
   switch(key) {
+      // ...
     case 'r':
       Forme f= new Rectangle(p);
       formes.add(f);
