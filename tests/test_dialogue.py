@@ -442,3 +442,71 @@ def test_move_without_shape_or_target():
     assert controller.on_event(
         click_at(12, 300, 250)
     ) == []
+
+
+def test_color_lookup_request():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    ) == []
+
+    assert controller.on_event(click_at(11, 220, 160)) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+
+    request = controller.pending_color_request
+
+    assert request is not None
+    assert request.request_id == 1
+    assert request.x == 220
+    assert request.y == 160
+
+
+def test_color_lookup_reverse_order():
+    controller = DialogueController()
+
+    assert controller.on_event(click_at(10, 220, 160)) == []
+
+    assert controller.on_event(
+        speech(11, action="create", shape="circle", color_ref=True)
+    ) == []
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+    assert controller.pending_color_request is not None
+
+
+def test_color_lookup_timeout():
+    controller = DialogueController(window_s=4.0)
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color_ref=True)
+    )
+    controller.on_event(click_at(11, 220, 160))
+
+    assert controller.state == DialogueState.COLOR_LOOKUP
+
+    controller.on_tick(14.5)
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.pending_color_request is None
+
+
+def test_combined_color_and_position_refs_wait():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(
+            10,
+            action="create",
+            shape="circle",
+            color_ref=True,
+            position_ref=True,
+        )
+    )
+
+    assert controller.on_event(click_at(11, 220, 160)) == []
+
+    # Click roles are not yet distinguishable.
+    assert controller.pending_color_request is None
+    assert controller.state == DialogueState.COLLECTING
