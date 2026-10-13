@@ -21,11 +21,14 @@ class DialogueController:
         self.default_position = default_position
         self.state = DialogueState.IDLE
         self.started_at: float | None = None
+        self.last_rejection_reason: str | None = None
 
     def on_event(self, event: InputEvent) -> list[PaletteCommand]:
         """Process an input event and attempt multimodal fusion."""
 
         # Expire the dialogue based on its first event.
+        self.last_rejection_reason = None
+
         if (
             self.started_at is not None
             and event.received_at - self.started_at > self.buffer.window_s
@@ -40,6 +43,14 @@ class DialogueController:
         self.buffer.add(event)
         events = self.buffer.get_events(event.received_at)
         self.state = DialogueState.COLLECTING
+
+        # Reject contradictory semantic information.
+        reason = self._conflict_reason(events)
+
+        if reason is not None:
+            self.reset()
+            self.last_rejection_reason = reason
+            return []
 
         # Attempt to create a complete multimodal command.
         command = self._try_create(events)
@@ -69,6 +80,7 @@ class DialogueController:
         self.buffer.clear()
         self.started_at = None
         self.state = DialogueState.IDLE
+        self.last_rejection_reason = None
 
     def _try_create(
         self, events: list[InputEvent]
@@ -268,3 +280,40 @@ class DialogueController:
             from_x=source.payload["x"],
             from_y=source.payload["y"],
         )
+    
+
+    def _conflict_reason(
+        self, events: list[InputEvent]
+    ) -> str | None:
+        """Detect contradictory semantic values in the dialogue."""
+
+        semantic = [
+            e for e in events
+            if e.kind in ("speech.command", "gesture.recognized")
+        ]
+
+        # Detect contradictory actions or shapes.
+        for field in ("action", "shape"):
+            values = {
+                e.payload[field]
+                for e in semantic
+                if field in e.payload
+            }
+
+            if len(values) > 1:
+                return f"conflicting_{field}"
+
+        # Colors are only allowed to come from speech.
+        spoken_colors = {
+            e.payload["color"]
+            for e in semantic
+            if (
+                e.kind == "speech.command"
+                and "color" in e.payload
+            )
+        }
+
+        if len(spoken_colors) > 1:
+            return "conflicting_color"
+
+        return None

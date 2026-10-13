@@ -85,6 +85,8 @@ def test_conflicting_shapes():
     assert controller.on_event(
         gesture(11, shape="triangle")
     ) == []
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_shape"
 
 
 def test_here_requires_click():
@@ -302,3 +304,81 @@ def test_move_timeout():
     assert controller.on_event(
         click_at(14.5, 300, 250)
     ) == []
+
+
+
+def test_conflicting_actions_cancel_dialogue():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle")
+    )
+
+    assert controller.on_event(
+        gesture(11, action="move")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.started_at is None
+    assert controller.last_rejection_reason == "conflicting_action"
+    assert controller.buffer.get_events(11) == []
+
+
+def test_conflicting_colors_cancel_dialogue():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="create", shape="circle", color="red")
+    )
+
+    assert controller.on_event(
+        speech(11, color="blue")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_color"
+
+
+def test_conflict_does_not_reuse_old_clicks():
+    controller = DialogueController()
+
+    controller.on_event(
+        speech(10, action="move", shape="rectangle")
+    )
+
+    controller.on_event(
+        click_at(11, 100, 150)
+    )
+
+    assert controller.on_event(
+        gesture(12, shape="triangle")
+    ) == []
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason == "conflicting_shape"
+
+    # A fresh dialogue cannot reuse the old source click.
+    assert controller.on_event(
+        click_at(13, 300, 250)
+    ) == []
+
+    assert controller.on_event(
+        speech(14, action="move", shape="rectangle")
+    ) == []
+
+
+def test_consistent_semantics_are_not_rejected():
+    controller = DialogueController()
+
+    assert controller.on_event(
+        speech(10, action="create", shape="circle")
+    ) == []
+
+    assert controller.on_event(
+        gesture(11, shape="circle")
+    ) == [
+        PaletteCommand("create", "circle", 400, 300)
+    ]
+
+    assert controller.state == DialogueState.IDLE
+    assert controller.last_rejection_reason is None
