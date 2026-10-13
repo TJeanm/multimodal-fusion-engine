@@ -18,6 +18,7 @@ Ivy bus;
 boolean fusionMode = true;
 
 ConcurrentLinkedQueue<String[]> commandesIvy = new ConcurrentLinkedQueue<String[]>();
+ConcurrentLinkedQueue<String[]> deplacementsIvy = new ConcurrentLinkedQueue<String[]>();
 
 void setup() {
   size(800,600);
@@ -42,6 +43,15 @@ void setup() {
     }
   );
 
+  bus.bindMsg(
+  "^Fusion Move Shape=(cercle|rectangle|triangle|losange|any) FromX=([0-9]+) FromY=([0-9]+) ToX=([0-9]+) ToY=([0-9]+)(?: Color=(rouge|vert|bleu))?$",
+  new IvyMessageListener() {
+    public void receive(IvyClient client, String[] args) {
+      deplacementsIvy.add(args.clone());
+    }
+  }
+);
+
   bus.start("127.255.255.255:2010");
   println("[IVY] Palette connectee au bus");
 
@@ -55,7 +65,8 @@ void draw() {
   
   background(0);
   traiterCommandesIvy();
-  println("MAE : " + mae + " indice forme active ; " + indice_forme);
+  traiterDeplacementsIvy();
+ // println("MAE : " + mae + " indice forme active ; " + indice_forme);
   switch (mae) {
     case INITIAL:  // Etat INITIAL
       background(255);
@@ -224,5 +235,95 @@ void traiterCommandesIvy() {
       println("[IVY] Forme creee : " + type +
               " (" + x + ", " + y + ")");
     }
+  }
+}
+
+
+boolean correspondType(Forme f, String type) {
+  if (type.equals("any")) return true;
+
+  if (type.equals("cercle")) return f instanceof Cercle;
+  if (type.equals("rectangle")) return f instanceof Rectangle;
+  if (type.equals("triangle")) return f instanceof Triangle;
+  if (type.equals("losange")) return f instanceof Losange;
+
+  return false;
+}
+
+
+boolean correspondCouleur(Forme f, String couleur) {
+
+  // No color filter: accept any object color.
+  if (couleur == null || couleur.trim().isEmpty()) {
+    return true;
+  }
+
+  if (couleur.equals("rouge"))
+    return f.getColor() == color(255, 0, 0);
+
+  if (couleur.equals("vert"))
+    return f.getColor() == color(0, 255, 0);
+
+  if (couleur.equals("bleu"))
+    return f.getColor() == color(0, 0, 255);
+
+  return false;
+}
+
+void traiterDeplacementsIvy() {
+  String[] args;
+
+  while ((args = deplacementsIvy.poll()) != null) {
+
+    String type = args[0];
+
+    int fromX = Integer.parseInt(args[1]);
+    int fromY = Integer.parseInt(args[2]);
+    int toX = Integer.parseInt(args[3]);
+    int toY = Integer.parseInt(args[4]);
+
+    String couleur = args.length > 5 ? args[5] : null;
+
+    Point source = new Point(fromX, fromY);
+    Point destination = new Point(toX, toY);
+
+    ArrayList<Forme> candidates = new ArrayList<Forme>();
+
+    for (Forme f : formes) {
+
+      println("[DEBUG] Objet : " + f.getClass().getSimpleName());
+      println("[DEBUG] Centre : "
+              + f.getLocation().x + ", "
+              + f.getLocation().y);
+
+      println("[DEBUG] Clic source : "
+              + fromX + ", " + fromY);
+
+      println("[DEBUG] isClicked : " + f.isClicked(source));
+      println("[DEBUG] Type OK : " + correspondType(f, type));
+      println("[DEBUG] Couleur OK : " + correspondCouleur(f, couleur));
+
+      if (!f.isClicked(source)) continue;
+      if (!correspondType(f, type)) continue;
+      if (!correspondCouleur(f, couleur)) continue;
+
+      candidates.add(f);
+    }
+
+    // Never select an arbitrary object when the click is ambiguous.
+    if (candidates.size() != 1) {
+      println("[IVY] Deplacement refuse : "
+            + candidates.size() + " objet(s) compatibles");
+      continue;
+    }
+
+    Forme selection = candidates.get(0);
+
+    selection.setLocation(destination);
+    mae = FSM.AFFICHER_FORMES;
+
+    println("[IVY] Forme deplacee : " + type
+            + " (" + fromX + ", " + fromY + ")"
+            + " -> (" + toX + ", " + toY + ")");
   }
 }
