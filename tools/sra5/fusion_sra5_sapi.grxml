@@ -82,6 +82,117 @@
       </item>
       <item>déplace ce losange bleu ici<tag>out = "action=move shape=diamond color=blue position_ref=true";</tag>
       </item>
+
+
+      <!-- Creation avec copie d'une couleur -->
+
+      <item>crée un cercle de cette couleur
+        <tag>out = "action=create shape=circle color_ref=true";</tag>
+      </item>
+
+      <item>crée un rectangle de cette couleur
+        <tag>out = "action=create shape=rectangle color_ref=true";</tag>
+      </item>
+
+      <item>crée un triangle de cette couleur
+        <tag>out = "action=create shape=triangle color_ref=true";</tag>
+      </item>
+
+      <item>crée un losange de cette couleur
+        <tag>out = "action=create shape=diamond color_ref=true";</tag>
+      </item>
+
+
+      <!-- Creation avec couleur source et position de destination -->
+
+      <item>crée un cercle ici de cette couleur
+        <tag>out = "action=create shape=circle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un rectangle ici de cette couleur
+        <tag>out = "action=create shape=rectangle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un triangle ici de cette couleur
+        <tag>out = "action=create shape=triangle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un losange ici de cette couleur
+        <tag>out = "action=create shape=diamond position_ref=true color_ref=true";</tag>
+      </item>
+
+      <!-- Variante avec ordre inverse des mots -->
+
+      <item>crée un cercle de cette couleur ici
+        <tag>out = "action=create shape=circle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un rectangle de cette couleur ici
+        <tag>out = "action=create shape=rectangle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un triangle de cette couleur ici
+        <tag>out = "action=create shape=triangle position_ref=true color_ref=true";</tag>
+      </item>
+
+      <item>crée un losange de cette couleur ici
+        <tag>out = "action=create shape=diamond position_ref=true color_ref=true";</tag>
+      </item>
+
+
+      <!-- Deplacement sans specification explicite de la forme -->
+
+      <item>déplace cet objet ici
+        <tag>out = "action=move target_ref=true position_ref=true";</tag>
+      </item>
+
+      <item>déplace cette forme ici
+        <tag>out = "action=move target_ref=true position_ref=true";</tag>
+      </item>
+
+      <!-- Creation avec couleur nommee et position facultative -->
+
+      <item>crée un cercle rouge
+        <tag>out = "action=create shape=circle color=red";</tag>
+      </item>
+      <item>crée un cercle vert
+        <tag>out = "action=create shape=circle color=green";</tag>
+      </item>
+      <item>crée un cercle bleu
+        <tag>out = "action=create shape=circle color=blue";</tag>
+      </item>
+
+      <item>crée un rectangle rouge
+        <tag>out = "action=create shape=rectangle color=red";</tag>
+      </item>
+      <item>crée un rectangle vert
+        <tag>out = "action=create shape=rectangle color=green";</tag>
+      </item>
+      <item>crée un rectangle bleu
+        <tag>out = "action=create shape=rectangle color=blue";</tag>
+      </item>
+
+      <item>crée un triangle rouge
+        <tag>out = "action=create shape=triangle color=red";</tag>
+      </item>
+      <item>crée un triangle vert
+        <tag>out = "action=create shape=triangle color=green";</tag>
+      </item>
+      <item>crée un triangle bleu
+        <tag>out = "action=create shape=triangle color=blue";</tag>
+      </item>
+
+      <item>crée un losange rouge
+        <tag>out = "action=create shape=diamond color=red";</tag>
+      </item>
+      <item>crée un losange vert
+        <tag>out = "action=create shape=diamond color=green";</tag>
+      </item>
+      <item>crée un losange bleu
+        <tag>out = "action=create shape=diamond color=blue";</tag>
+      </item>
+
+
     </one-of>
   </rule>
 </grammar>
