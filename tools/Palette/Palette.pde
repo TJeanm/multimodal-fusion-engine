@@ -35,7 +35,7 @@ void setup() {
   bus = new Ivy("Palette", "Palette Ready", null);
 
   bus.bindMsg(
-    "^Fusion Create=(cercle|rectangle|triangle|losange) X=([0-9]+) Y=([0-9]+)$",
+    "^Fusion Create=(cercle|rectangle|triangle|losange) X=([0-9]+) Y=([0-9]+)(?: Color=(rouge|vert|bleu))?$",
     new IvyMessageListener() {
       public void receive(IvyClient client, String[] args) {
         commandesIvy.add(args.clone());
@@ -215,6 +215,9 @@ void traiterCommandesIvy() {
     int x = Integer.parseInt(args[1]);
     int y = Integer.parseInt(args[2]);
 
+    // La couleur est facultative.
+    String couleur = args.length > 3 ? args[3] : null;
+
     Point p = new Point(x, y);
     Forme f = null;
 
@@ -229,11 +232,22 @@ void traiterCommandesIvy() {
     }
 
     if (f != null) {
+
+      // Appliquer la couleur demandée.
+      if ("rouge".equals(couleur)) {
+        f.setColor(color(255, 0, 0));
+      } else if ("vert".equals(couleur)) {
+        f.setColor(color(0, 255, 0));
+      } else if ("bleu".equals(couleur)) {
+        f.setColor(color(0, 0, 255));
+      }
+
       formes.add(f);
       mae = FSM.AFFICHER_FORMES;
 
-      println("[IVY] Forme creee : " + type +
-              " (" + x + ", " + y + ")");
+      println("[IVY] Forme creee : " + type
+              + " (" + x + ", " + y + ")"
+              + " couleur=" + couleur);
     }
   }
 }
