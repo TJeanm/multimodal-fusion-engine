@@ -90,7 +90,7 @@ def main() -> None:
     IvyBindMsg(on_gesture, GESTURE_PATTERN)
     IvyBindMsg(on_speech, SPEECH_PATTERN)
     IvyStart(IVY_BUS)
-    controller = DialogueController()
+    controller = DialogueController(window_s=8.0)
     print("[IVY] Connected; listening for pointing, gesture, speech")
     try:
         while True:
