@@ -19,6 +19,7 @@ boolean fusionMode = true;
 
 ConcurrentLinkedQueue<String[]> commandesIvy = new ConcurrentLinkedQueue<String[]>();
 ConcurrentLinkedQueue<String[]> deplacementsIvy = new ConcurrentLinkedQueue<String[]>();
+ConcurrentLinkedQueue<String[]> couleursIvy = new ConcurrentLinkedQueue<String[]>();
 
 void setup() {
   size(800,600);
@@ -51,6 +52,14 @@ void setup() {
     }
   }
 );
+  bus.bindMsg(
+  "^Fusion GetColor X=([0-9]+) Y=([0-9]+) RequestId=([0-9]+)$",
+  new IvyMessageListener() {
+    public void receive(IvyClient client, String[] args) {
+      couleursIvy.add(args.clone());
+    }
+  }
+);
 
   bus.start("127.255.255.255:2010");
   println("[IVY] Palette connectee au bus");
@@ -66,6 +75,7 @@ void draw() {
   background(0);
   traiterCommandesIvy();
   traiterDeplacementsIvy();
+  traiterCouleursIvy();
  // println("MAE : " + mae + " indice forme active ; " + indice_forme);
   switch (mae) {
     case INITIAL:  // Etat INITIAL
@@ -339,5 +349,65 @@ void traiterDeplacementsIvy() {
     println("[IVY] Forme deplacee : " + type
             + " (" + fromX + ", " + fromY + ")"
             + " -> (" + toX + ", " + toY + ")");
+  }
+}
+
+String nomCouleur(Forme f) {
+  int c = f.getColor();
+
+  if (c == color(255, 0, 0)) return "rouge";
+  if (c == color(0, 255, 0)) return "vert";
+  if (c == color(0, 0, 255)) return "bleu";
+
+  return "none";
+}
+
+
+void traiterCouleursIvy() {
+  String[] args;
+
+  while ((args = couleursIvy.poll()) != null) {
+
+    int x = Integer.parseInt(args[0]);
+    int y = Integer.parseInt(args[1]);
+    String requestId = args[2];
+
+    Point p = new Point(x, y);
+
+    ArrayList<Forme> candidates = new ArrayList<Forme>();
+
+    // Chercher toutes les formes sous le clic.
+    for (Forme f : formes) {
+      if (f.isClicked(p)) {
+        candidates.add(f);
+      }
+    }
+
+    String couleur;
+
+    if (candidates.size() == 0) {
+      // Aucune forme trouvee.
+      couleur = "none";
+
+    } else if (candidates.size() > 1) {
+      // Plusieurs formes superposees.
+      couleur = "ambiguous";
+
+    } else {
+      // Une seule forme : lire sa couleur.
+      couleur = nomCouleur(candidates.get(0));
+    }
+
+    String message =
+      "Palette ColorAt RequestId=" + requestId
+      + " Color=" + couleur;
+
+    try {
+      bus.sendMsg(message);
+      println("[IVY] " + message);
+
+    } catch (IvyException e) {
+      println("[IVY] Erreur ColorAt : " + e.getMessage());
+    }
   }
 }
