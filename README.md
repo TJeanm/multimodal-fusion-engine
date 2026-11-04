@@ -6,19 +6,25 @@ The objective is to design a **multimodal fusion engine** inspired by the *Put T
 
 ## Current status
 
-**Initial integration validated.** The supplied Processing palette has been extended with an Ivy message listener. A manually sent Ivy message successfully created a circle in the running palette.
+The multimodal fusion engine is implemented and validated
+through automated tests and simulated Ivy interactions.
 
 | Component | Status |
 | --- | --- |
-| Python environment and Ivy dependency | Set up locally |
-| Processing drawing palette | Running locally |
-| Ivy-to-Processing command interface | Implemented and manually tested for circle creation |
-| Multimodal dialogue controller and fusion logic | Planned |
-| Speech-recognition integration (`sra5`) | Planned |
-| Gesture-recognition integration (`OneDollarIvy` / $N) | Planned |
-| Automated test suite | Planned |
+| Python fusion engine | Implemented |
+| Dialogue FSM and temporal buffer | Implemented |
+| Multimodal shape creation | Implemented |
+| Multimodal shape movement | Implemented |
+| Named colors (red, green, blue) | Implemented |
+| Color lookup via Ivy | Implemented |
+| Combined color and position references | Implemented |
+| SRA5 speech grammar | Implemented, XML and semantic tests passed |
+| OneDollarIvy gesture recognition | Integrated, real recognition pending validation |
+| Processing palette | Extended, final graphical validation pending |
+| Automated Python tests | 131 tests passed |
 
-**Important:** The successful Ivy-to-Processing test is an integration smoke test, **not** a completed multimodal interaction. Real speech, gesture recognition, and temporal fusion have not yet been validated.
+Note: Automated tests do not replace end-to-end validation
+with the real Processing, SRA5 and OneDollarIvy applications.
 
 ## Architecture
 
@@ -100,23 +106,39 @@ Fusion Create=cercle X=200 Y=180
 
 This is a manual smoke test of the Ivy connection and the palette's command handler. It does not depend on the Python fusion logic.
 
-## Ivy command protocol
 
-The following command format was added to the course palette for this project:
+## Ivy communication protocol
 
-```text
-Fusion Create=<shape> X=<x> Y=<y>
-```
+The application uses the Ivy message bus at `127.255.255.255:2010`.
 
-Supported shapes: `cercle`, `rectangle`, `triangle`, `losange`. Coordinates are non-negative integer values in the palette's coordinate system.
+### Input events
 
-Example:
+| Source | Message |
+| --- | --- |
+| Speech | `sra5 Parsed=action=create shape=circle Confidence=0.95 NP=0 Num_A=0` |
+| Gesture | `OneDollarIvy Template=Cercle Confidence=0.95` |
+| Mouse | `Palette Click X=200 Y=180` |
 
-```text
-Fusion Create=rectangle X=350 Y=240
-```
+### Fusion engine commands
 
-This is a **project-specific protocol**. It is not part of the unmodified course-provided palette. Additional messages for selection, movement, color, and pointing will be defined as the fusion engine evolves.
+| Operation | Example |
+| --- | --- |
+| Create | `Fusion Create=cercle X=200 Y=180` |
+| Create with color | `Fusion Create=cercle X=200 Y=180 Color=rouge` |
+| Move | `Fusion Move Shape=cercle FromX=200 FromY=180 ToX=400 ToY=300` |
+| Query color | `Fusion GetColor X=200 Y=180 RequestId=1` |
+| Color response | `Palette ColorAt RequestId=1 Color=rouge` |
+
+Supported shapes: `cercle`, `rectangle`, `triangle`, `losange`.
+
+Supported colors: `rouge`, `vert`, `bleu`.
+
+Color lookup may return `none` or `ambiguous` when no valid source can be identified.
+
+The dialogue controller requires at least two distinct input modalities before executing a user command. The configured runtime fusion window is 8 seconds.
+
+The Python protocol is covered by automated tests. Final validation with the real Processing palette and speech/gesture recognizers is still pending.
+
 
 ## Repository structure
 
@@ -171,3 +193,78 @@ Keep the Ivy message protocol and shared event structures documented before deve
 - Denis Lalanne et al., [*Fusion Engines for Multimodal Input: A Survey*](https://iihm.imag.fr/publs/2009/FinalSurvey.pdf) (2009)
 
 The initial Processing palette is supplied by the course instructors. This repository contains its adaptation for communication with the Python-based multimodal fusion engine.
+
+
+## Running the application
+
+All applications communicate through the Ivy bus:
+
+`127.255.255.255:2010`
+
+### Clone the current project version
+
+```powershell
+git clone -b feature/finalisation-tp https://github.com/TJeanm/multimodal-fusion-engine.git
+cd multimodal-fusion-engine
+
+
+### 1. Install Python dependencies
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 2. Start the fusion engine
+
+```powershell
+.\.venv\Scripts\python.exe -m fusion_engine.ivy_adapter
+```
+
+### 3. Start the Processing palette
+
+Open `tools/Palette/Palette.pde` with Processing 4
+and press Run.
+
+The palette starts in Fusion mode.
+
+Press V to switch between Fusion and local Debug modes.
+
+### 4. Start speech recognition
+
+On Windows, run:
+
+```powershell
+.\tools\sra5\sra5_on.bat
+```
+
+This loads `fusion_sra5_sapi.grxml`.
+
+### 5. Start gesture recognition
+
+Open `tools/OneDollarIvy/OneDollarIvy.pde`
+with Processing 4 and press Run.
+
+Import the trained templates and enter recognition mode.
+
+### 6. Run automated tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+### 7. Test without graphical applications
+
+Example: create a red circle at (300, 250).
+
+```powershell
+.\.venv\Scripts\python.exe -m simulators.send_test_events speech --shape circle --color red --here
+.\.venv\Scripts\python.exe -m simulators.send_test_events click 300 250
+```
+
+The engine should output:
+
+`Fusion Create=cercle X=300 Y=250 Color=rouge`
+
+The events must arrive within the configured 8-second
+fusion window.
