@@ -4,6 +4,7 @@ Developer B can reuse parse_ivy_message() with an event consumer. The callbacks
 only enqueue events; the controller should run in one consumer thread.
 """
 
+from dataclasses import dataclass
 from queue import Empty, Queue
 
 import time
@@ -23,7 +24,26 @@ from fusion_engine.event_parser import (
 from fusion_engine.events import InputEvent
 
 IVY_BUS = "127.255.255.255:2010"
-event_queue: Queue[InputEvent] = Queue()
+COLOR_REPLY_PATTERN = (
+    r"^Palette ColorAt RequestId=(\d+) "
+    r"Color=(rouge|vert|bleu|none|ambiguous)$"
+)
+
+FR_TO_EN = {
+    "rouge": "red",
+    "vert": "green",
+    "bleu": "blue",
+}
+
+
+@dataclass(frozen=True)
+class ColorReply:
+    request_id: int
+    color: str
+    received_at: float
+
+
+event_queue: Queue[InputEvent | ColorReply] = Queue()
 
 
 def _queue(raw: str) -> None:
@@ -44,6 +64,15 @@ def on_gesture(agent, template: str, confidence: str) -> None:
 
 def on_speech(agent, semantics: str, confidence: str) -> None:
     _queue(f"sra5 Parsed={semantics} Confidence={confidence}")
+
+def on_palette_color(agent, request_id: str, color: str) -> None:
+    event_queue.put(
+        ColorReply(
+            request_id=int(request_id),
+            color=FR_TO_EN.get(color, color),
+            received_at=time.monotonic(),
+        )
+    )
 
 SHAPES = {
     "circle": "cercle",
@@ -86,12 +115,17 @@ def encode_command(command: PaletteCommand) -> str:
 
 def main() -> None:
     IvyInit("FusionAdapter", "FusionAdapter Ready")
+
     IvyBindMsg(on_palette_click, CLICK_PATTERN)
     IvyBindMsg(on_gesture, GESTURE_PATTERN)
     IvyBindMsg(on_speech, SPEECH_PATTERN)
+    IvyBindMsg(on_palette_color, COLOR_REPLY_PATTERN)
+
     IvyStart(IVY_BUS)
+
     controller = DialogueController(window_s=8.0)
-    print("[IVY] Connected; listening for pointing, gesture, speech")
+    print("[IVY] Connected; listening for pointing, gesture, speech, color")
+
     try:
         while True:
             try:
@@ -101,9 +135,34 @@ def main() -> None:
                 controller.on_tick(time.monotonic())
                 continue
 
-            print(f"[EVENT] {event}")
+            if isinstance(event, ColorReply):
+                print(
+                    f"[COLOR] RequestId={event.request_id} "
+                    f"Color={event.color}"
+                )
 
-            commands = controller.on_event(event)
+                commands = controller.on_color_result(
+                    event.request_id,
+                    event.color,
+                    event.received_at,
+                )
+
+            else:
+                print(f"[EVENT] {event}")
+
+                previous_request = controller.pending_color_request
+                commands = controller.on_event(event)
+
+                request = controller.pending_color_request
+
+                if request is not None and request != previous_request:
+                    message = (
+                        f"Fusion GetColor X={request.x} "
+                        f"Y={request.y} RequestId={request.request_id}"
+                    )
+
+                    IvySendMsg(message)
+                    print(f"[QUERY] {message}")
 
             for command in commands:
                 message = encode_command(command)
@@ -112,6 +171,7 @@ def main() -> None:
 
     except KeyboardInterrupt:
         print("\n[IVY] Stopping...")
+
     finally:
         IvyStop()
 

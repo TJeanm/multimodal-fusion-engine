@@ -23,6 +23,7 @@ def main() -> None:
     speech.add_argument("--shape", choices=["circle", "rectangle", "triangle", "diamond"])
     speech.add_argument("--color", choices=["red", "green", "blue"])
     speech.add_argument("--here", action="store_true", help="Speech refers to a point")
+    speech.add_argument("--color-ref", action="store_true")
     speech.add_argument("--confidence", type=float, default=0.95)
 
     gesture = sub.add_parser("gesture")
@@ -33,6 +34,13 @@ def main() -> None:
     click.add_argument("x", type=int)
     click.add_argument("y", type=int)
 
+    color_reply = sub.add_parser("color-reply")
+    color_reply.add_argument("request_id", type=int)
+    color_reply.add_argument(
+        "color",
+        choices=["rouge", "vert", "bleu", "none", "ambiguous"],
+    )
+
     args = parser.parse_args()
     if args.modality == "speech":
         semantics = [f"action={args.action}"]
@@ -42,12 +50,26 @@ def main() -> None:
             semantics.append(f"color={args.color}")
         if args.here:
             semantics.append("position_ref=true")
+
+        if args.color_ref:
+            if args.color:
+                parser.error("--color-ref cannot be combined with --color")
+            semantics.append("color_ref=true")
         msg = (
             f"sra5 Parsed={' '.join(semantics)} "
             f"Confidence={args.confidence:.2f} NP=0 Num_A=0"
         )
     elif args.modality == "gesture":
         msg = f"OneDollarIvy Template={args.template} Confidence={args.confidence:.2f}"
+
+    elif args.modality == "color-reply":
+        if args.request_id < 0:
+            parser.error("request_id must be non-negative")
+
+        msg = (
+            f"Palette ColorAt RequestId={args.request_id} "
+            f"Color={args.color}"
+        )
     else:
         if args.x < 0 or args.y < 0:
             parser.error("click coordinates must be non-negative")
