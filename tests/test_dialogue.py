@@ -746,3 +746,75 @@ def test_color_lookup_exact_timeout_boundary():
     ]
 
     assert controller.state == DialogueState.IDLE
+
+
+def test_combined_color_and_position_lookup():
+    controller = DialogueController()
+
+    # Speech requests both a color reference and a position.
+    assert controller.on_event(
+        speech(
+            10,
+            action="create",
+            shape="circle",
+            color_ref=True,
+            position_ref=True,
+        )
+    ) == []
+
+    # First click: source of the color.
+    assert controller.on_event(
+        click_at(11, 100, 120)
+    ) == []
+
+    assert controller.pending_color_request is None
+
+    # Second click: destination.
+    assert controller.on_event(
+        click_at(12, 550, 360)
+    ) == []
+
+    request = controller.pending_color_request
+    assert request is not None
+    assert (request.x, request.y) == (100, 120)
+
+    # The palette returns the source object's color.
+    assert controller.on_color_result(
+        request.request_id, "red", 13
+    ) == [
+        PaletteCommand(
+            "create", "circle", 550, 360, color="red"
+        )
+    ]
+
+    assert controller.state == DialogueState.IDLE
+
+
+def test_combined_color_and_position_reverse_input_order():
+    controller = DialogueController()
+
+    # The two clicks arrive before speech.
+    controller.on_event(click_at(10, 150, 180))
+    controller.on_event(click_at(11, 600, 400))
+
+    controller.on_event(
+        speech(
+            12,
+            action="create",
+            shape="triangle",
+            color_ref=True,
+            position_ref=True,
+        )
+    )
+
+    request = controller.pending_color_request
+    assert request is not None
+    assert (request.x, request.y) == (150, 180)
+
+    assert controller.on_color_result(
+        request.request_id, "blue", 13
+    ) == [
+        PaletteCommand(
+            "create", "triangle", 600, 400, color="blue"
+        )
+    ]

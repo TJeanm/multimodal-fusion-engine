@@ -365,12 +365,12 @@ class DialogueController:
             return False
 
         # Combined references need separate click-role resolution.
-        if any(
-            e.payload.get("position_ref")
-            or e.payload.get("target_ref")
-            for e in spoken
-        ):
+        if any(e.payload.get("target_ref") for e in spoken):
             return False
+
+        position_requested = any(
+            e.payload.get("position_ref") for e in spoken
+        )
 
         # Do not mix a named color with a color reference.
         if any("color" in e.payload for e in spoken):
@@ -409,7 +409,11 @@ class DialogueController:
         if len(shapes) != 1 or not shapes <= valid_shapes:
             return False
 
-        if len(clicks) != 1:
+        # One click selects the color source.
+        # A second click is required if a position was requested.
+        required_clicks = 2 if position_requested else 1
+
+        if len(clicks) != required_clicks:
             return False
 
         # Prepare a query for the palette.
@@ -492,8 +496,32 @@ class DialogueController:
             self.last_rejection_reason = "invalid_color_lookup_context"
             return []
 
-        # The pointing event selected a color source, not a position.
-        x, y = self.default_position
+        spoken = [
+    e for e in semantic
+    if e.kind == "speech.command"
+]
+
+        position_requested = any(
+            e.payload.get("position_ref") for e in spoken
+        )
+
+        if position_requested:
+            clicks = [
+                e for e in events
+                if e.kind == "pointing.click"
+            ]
+
+            if len(clicks) != 2:
+                self.reset()
+                self.last_rejection_reason = "invalid_position_context"
+                return []
+
+            # First click = color source, second click = destination.
+            x = clicks[1].payload["x"]
+            y = clicks[1].payload["y"]
+
+        else:
+            x, y = self.default_position
 
         command = PaletteCommand(
             action="create",
